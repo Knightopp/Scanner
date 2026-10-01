@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../core/utils/qr_payload_parser.dart';
 import '../../checkin/models/attendance_mode.dart';
 import '../../checkin/services/checkin_service.dart';
 import '../../participants/models/participant_model.dart';
@@ -55,10 +57,13 @@ class _ScanScreenState extends State<ScanScreen> {
     final rawValue = barcodes.first.rawValue?.trim();
     if (rawValue == null || rawValue.isEmpty) return;
 
+    // Haptic feedback on camera barcode lock
+    HapticFeedback.mediumImpact();
+
     setState(() => _isProcessingScan = true);
 
     try {
-      // 1. Look up participant from Supabase
+      // 1. Look up participant from Supabase using smart QR payload parser
       final participantData = await ParticipantService().getParticipantByCode(rawValue);
 
       if (!mounted) return;
@@ -110,6 +115,8 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 
   Future<void> _showInvalidCodeDialog(String code) {
+    final parsed = QRPayloadParser.parse(code);
+
     return showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
@@ -132,24 +139,47 @@ class _ScanScreenState extends State<ScanScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Invalid QR / Participant not found in system:',
-              style: TextStyle(color: AppColors.textDarkSecondary, fontSize: 14),
+            Text(
+              parsed.isSrishtiQR
+                  ? 'Recognized ${parsed.formatName}, but not found in database:'
+                  : 'Invalid QR / Participant not found in system:',
+              style: const TextStyle(color: AppColors.textDarkSecondary, fontSize: 13),
             ),
             const SizedBox(height: 10),
             Container(
+              width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
                 color: AppColors.surfaceDark,
                 borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.borderDarkSubtle),
               ),
-              child: Text(
-                code,
-                style: const TextStyle(
-                  fontFamily: 'monospace',
-                  color: AppColors.cyan,
-                  fontSize: 13,
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Extracted ID: ${parsed.primaryId}',
+                    style: const TextStyle(
+                      fontFamily: 'monospace',
+                      color: AppColors.cyan,
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  if (code != parsed.primaryId) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      'Raw: $code',
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        color: AppColors.textDarkSecondary,
+                        fontSize: 11,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ],
               ),
             ),
           ],

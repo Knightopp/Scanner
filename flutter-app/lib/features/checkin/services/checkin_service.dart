@@ -1,5 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/services/supabase_service.dart';
+import '../../../core/utils/qr_payload_parser.dart';
 import '../../history/models/activity_item.dart';
 
 /// Result object for arrival check-in and event attendance operations.
@@ -170,45 +171,51 @@ class CheckinService {
     final clean = participantIdOrCode.trim();
     if (clean.isEmpty) return null;
 
+    final parsed = QRPayloadParser.parse(clean);
+
     // 1. If it's already a valid UUID, verify or return directly
-    if (isUuid(clean)) {
+    if (parsed.isUuid) {
       try {
         final res = await _supabaseService.client
             .from('participants')
             .select('id')
-            .eq('id', clean)
+            .eq('id', parsed.primaryId)
             .maybeSingle();
         if (res != null && res['id'] != null) {
           return res['id'].toString();
         }
       } catch (_) {}
-      return clean;
+      return parsed.primaryId;
     }
 
-    // 2. Lookup in participants table by participant_code
-    try {
-      final byCode = await _supabaseService.client
-          .from('participants')
-          .select('id')
-          .eq('participant_code', clean.toUpperCase())
-          .maybeSingle();
-      if (byCode != null && byCode['id'] != null) {
-        return byCode['id'].toString();
-      }
-    } catch (_) {}
+    // 2. Lookup in participants table across all candidate codes
+    for (final candidate in parsed.candidateKeys) {
+      try {
+        final byCode = await _supabaseService.client
+            .from('participants')
+            .select('id')
+            .eq('participant_code', candidate.toUpperCase())
+            .maybeSingle();
+        if (byCode != null && byCode['id'] != null) {
+          return byCode['id'].toString();
+        }
+      } catch (_) {}
+    }
 
     // 3. Fallback search by ilike pattern on participant_code
-    try {
-      final byPattern = await _supabaseService.client
-          .from('participants')
-          .select('id')
-          .or('participant_code.ilike.%$clean%')
-          .limit(1)
-          .maybeSingle();
-      if (byPattern != null && byPattern['id'] != null) {
-        return byPattern['id'].toString();
-      }
-    } catch (_) {}
+    if (parsed.primaryId.length >= 3) {
+      try {
+        final byPattern = await _supabaseService.client
+            .from('participants')
+            .select('id')
+            .ilike('participant_code', '%${parsed.primaryId}%')
+            .limit(1)
+            .maybeSingle();
+        if (byPattern != null && byPattern['id'] != null) {
+          return byPattern['id'].toString();
+        }
+      } catch (_) {}
+    }
 
     return null;
   }
